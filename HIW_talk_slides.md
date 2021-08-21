@@ -247,7 +247,7 @@ but also type normalisation in the pattern match checker.
 <br />
 
 Stephanie Weirich posed the challenge of implementing
-implement a strongly-typed representation of System F.
+a strongly-typed representation of System F.
 [[Talk]](https://www.youtube.com/watch?v=j2xYSxMkXeQ)
 [[GitHub]](https://github.com/sweirich/challenge/)
 
