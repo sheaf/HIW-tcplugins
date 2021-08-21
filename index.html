@@ -1,0 +1,1795 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="generator" content="pandoc">
+  <meta name="author" content="Sam Derbyshire, Tweag">
+  <title>Rewriting type families with GHC type-checking plugins</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, minimal-ui">
+  <link rel="stylesheet" href="reveal.js/dist/reset.css">
+  <link rel="stylesheet" href="reveal.js/dist/reveal.css">
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    span.underline{text-decoration: underline;}
+    div.column{display: inline-block; vertical-align: top; width: 50%;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    ul.task-list{list-style: none;}
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="reveal.js/dist/theme/tweag_theme.css" id="theme">
+</head>
+<body>
+  <div class="reveal">
+    <div class="slides">
+
+<section id="title-slide">
+  <h1 class="title">Rewriting type families with GHC type-checking plugins</h1>
+  <p class="author">Sam Derbyshire, Tweag</p>
+  <p class="date">August 22nd, 2021</p>
+</section>
+
+<section id="introduction" class="slide level2">
+<h2>Introduction</h2>
+<!--
+Compile the HTML slides with Pandoc:
+
+pandoc -t revealjs -s -o HIW_talk_slides.html HIW_talk_slides.md -V revealjs-url=reveal.js -V theme=tweag_theme -V controlsTutorial=false -V controlsLayout=edges -V slideNumber='c/t' -V transition=slide
+
+Custom theme in reveal.js/dist/themes/tweag_theme.css
+-->
+<aside class="notes">
+<p>Hi everyone!</p>
+<p>This summer, I’ve been working on GHC with Richard Eisenberg.</p>
+<p>I’ve made some improvements to type-checking plugins which I’d like to share.</p>
+<ul>
+<li>native support for rewriting type families,</li>
+<li>improvements to the API, with the <code>ghc-tcplugin-api</code> library.</li>
+</ul>
+</aside>
+</section>
+<section id="talk-overview" class="slide level2">
+<h2>Talk overview</h2>
+<p><br /></p>
+<ul>
+<li>When to reach for a type-checking plugin?</li>
+<li>Lightning fast review of type-checker plugins.</li>
+<li>New functionality: rewriting type family applications.</li>
+<li>Illustration: intrinsically typed System F.</li>
+<li>Presentation of a library for writing type-checking plugins.</li>
+</ul>
+</section>
+<section id="when-to-reach-for-a-type-checking-plugin" class="slide level2">
+<h2>When to reach for a type-checking plugin?</h2>
+<aside class="notes">
+<p>Custom solver logic. Not restricted to GHC instance resolution. Type family reduction (focus of this talk).</p>
+<ul>
+<li>Matt Noonan - Ghosts of Departed Proofs</li>
+<li>Hiromi Ishii - ghc-typelits-presburger</li>
+<li>Christiaan Baaij - ghc-typelits-natnormalise, ghc-typelits-knownnat</li>
+<li>Adam Gundry - units of measure</li>
+<li>Oleg Grenrus - regular expressions</li>
+</ul>
+</aside>
+</section>
+<section id="equational-theory-peano-arithmetic" class="slide level2">
+<h2>Equational theory: Peano arithmetic</h2>
+<p><br /></p>
+<p>GHC doesn’t understand basic arithmetic.</p>
+<div class="element: fragment">
+<div class="sourceCode" id="cb1"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span><span class="ot"> (+) ::</span> <span class="dt">Nat</span> <span class="ot">-&gt;</span> <span class="dt">Nat</span> <span class="ot">-&gt;</span> <span class="dt">Nat</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> <span class="kw">family</span> a <span class="op">+</span> b <span class="kw">where</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Zero</span>   <span class="op">+</span> b <span class="ot">=</span> b</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Succ</span> a <span class="op">+</span> b <span class="ot">=</span> <span class="dt">Succ</span> (a <span class="op">+</span> b)</span></code></pre></div>
+</div>
+<div class="element: fragment">
+<p>GHC can only reduce <code>a + b</code> when it knows what <code>a</code> is:<br />
+is it <code>Zero</code> or is it <code>Succ i</code> for some <code>i</code>?</p>
+</div>
+<p><br /></p>
+<div class="element: fragment">
+<p>Can’t reason about <code>(+)</code> parametrically:</p>
+<pre><code>Could not deduce n + Succ n ~ Succ (n + n)</code></pre>
+</div>
+<aside class="notes">
+<p>Christiaan Baaij’s <code>ghc-typelits-natnormalise</code> type-checker plugin can handle this.</p>
+</aside>
+</section>
+<section id="equational-theory-row-types" class="slide level2">
+<h2>Equational theory: row types</h2>
+<p><br /></p>
+<div class="element: fragment">
+<p><strong>Row</strong>: unordered association map, field name ⇝ type.<br />
+Can be used to model extensible records (order doesn’t matter).</p>
+</div>
+<p><br /></p>
+<div class="element: fragment">
+<p>To account for re-ordering, we need:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="dt">Insert</span> k v (<span class="dt">Insert</span> l w r) <span class="op">~</span> <span class="dt">Insert</span> l w (<span class="dt">Insert</span> k v r)</span></code></pre></div>
+<p>when <code>k</code> and <code>l</code> are distinct field names that don’t appear in the row <code>r</code>.</p>
+</div>
+<div class="element: fragment">
+<p>Problem: in GHC, we can’t have type-families on the LHS of a type family equation:</p>
+</div>
+<div class="element: fragment">
+<pre><code>• Illegal type synonym family application ‘Insert l w r’ in instance:
+    Insert k v (Insert l w r)</code></pre>
+</div>
+</section>
+<section id="non-confluence" class="slide level2">
+<h2>Non-confluence</h2>
+<p><br /></p>
+<div class="element: fragment">
+<p>GHC can’t allow type-families on the LHS of a type family equation in general: no guarantee type-family reduction is confluent.</p>
+</div>
+<div class="element: fragment">
+<div class="sourceCode" id="cb5"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> <span class="dt">F</span><span class="ot"> ::</span> <span class="dt">Type</span> <span class="ot">-&gt;</span> <span class="dt">Type</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> <span class="kw">family</span> <span class="dt">F</span> a <span class="kw">where</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">F</span> (<span class="dt">F</span> a) <span class="ot">=</span> a       <span class="co">-- F[0]</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">F</span> <span class="dt">Bool</span>  <span class="ot">=</span> <span class="dt">Float</span>   <span class="co">-- F[1]</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">F</span> a     <span class="ot">=</span> <span class="dt">Maybe</span> a <span class="co">-- F[2]</span></span></code></pre></div>
+</div>
+<div class="element: fragment">
+<div class="sourceCode" id="cb6"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="dt">F</span> (<span class="dt">F</span> <span class="dt">Bool</span>) <span class="op">~</span><span class="dt">F</span>[<span class="dv">0</span>]<span class="op">~&gt;</span> <span class="dt">Bool</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="dt">F</span> (<span class="dt">F</span> <span class="dt">Bool</span>) <span class="op">~</span>(<span class="dt">F</span> <span class="dt">F</span>[<span class="dv">1</span>])<span class="op">~&gt;</span> <span class="dt">F</span> <span class="dt">Float</span> <span class="op">~</span><span class="dt">F</span>[<span class="dv">2</span>]<span class="op">~&gt;</span> <span class="dt">Maybe</span> <span class="dt">Float</span></span></code></pre></div>
+</div>
+<aside class="notes">
+<p>The F[i] notation just means the i-th type-family equation (branched coercion axiom), counting from 0.</p>
+<p>Confluence means that the result of rewriting doesn’t depend on the order in which we perform reductions: diamond property.</p>
+<p>Authors of type-checking plugins should be careful not to introduce non-confluence.</p>
+</aside>
+</section>
+<section id="type-checking-plugins-to-the-rescue" class="slide level2">
+<h2>Type-checking plugins to the rescue</h2>
+<p align="center">
+<img src=GHC_Tc_state_machine_HIW_1.svg height="550px" />
+</p>
+<aside class="notes">
+<p>LHS: GHC typechecker state machine. Start, type-checking loop, stop.</p>
+<p>RHS: type-checking plugin (TcPlugin datatype we are about to review).</p>
+<p>Review the existential <code>s</code> environment/state; plugin authors will already be familiar with this. The plugin author can choose this type; usually it will contain name information that is looked up on plugin initialisation. Initialisation gives us <code>s</code>, which we pass to the different stages (we only do this once). This initialises the various stages so that they are ready to be called by GHC.</p>
+<p>Briefly talk about the situations in which GHC calls <code>tcPluginSolve</code> (solving implications, ambiguity check, typechecking RULES, etc). Emphasise that it doesn’t really matter.</p>
+</aside>
+</section>
+<section id="rewriter-plugins" class="slide level2">
+<h2>Rewriter plugins</h2>
+<div class="element: fragment">
+<div class="sourceCode" id="cb7"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">TcPlugin</span> <span class="ot">=</span> <span class="kw">forall</span> s<span class="op">.</span> <span class="dt">TcPlugin</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>  {<span class="ot"> tcPluginInit    ::</span> <span class="dt">TcPluginM</span> s</span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>  ,<span class="ot"> tcPluginSolve   ::</span> s <span class="ot">-&gt;</span> <span class="dt">TcPluginSolver</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>  ,<span class="ot"> tcPluginRewrite ::</span> s <span class="ot">-&gt;</span> <span class="dt">UniqFM</span> <span class="dt">TyCon</span> <span class="dt">TcPluginRewriter</span> <span class="co">-- new!</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>  ,<span class="ot"> tcPluginStop    ::</span> s <span class="ot">-&gt;</span> <span class="dt">TcPluginM</span> ()</span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>  }</span></code></pre></div>
+</div>
+<div class="element: fragment">
+<div class="sourceCode" id="cb8"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> <span class="dt">TcPluginRewriter</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>  <span class="ot">=</span>  [<span class="dt">Ct</span>]   <span class="co">-- Givens</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>  <span class="ot">-&gt;</span> [<span class="dt">Type</span>] <span class="co">-- Type family arguments</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>  <span class="ot">-&gt;</span> <span class="dt">TcPluginM</span> <span class="dt">TcPluginRewriteResult</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">TcPluginRewriteResult</span></span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>  <span class="ot">=</span> <span class="dt">TcPluginNoRewrite</span></span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a>  <span class="op">|</span> <span class="dt">TcPluginRewriteTo</span></span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> tcPluginReduction    ::</span> <span class="op">!</span><span class="dt">Reduction</span></span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> tcRewriterNewWanteds ::</span> [<span class="dt">Ct</span>]</span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Reduction</span> <span class="ot">=</span> <span class="dt">Reduction</span> <span class="dt">Coercion</span> <span class="op">!</span><span class="dt">Type</span></span></code></pre></div>
+</div>
+<aside class="notes">
+<p>We supply rewriters for each type-family with a map: <code>UniqFM TyCon TcPluginRewriter</code>.</p>
+<p><code>Reduction</code>: the stored coercion is left-to-right.<br />
+Plugin authors can pass a <code>UnivCo (PluginProv ...) lhs rhs</code> (“just believe me”) as usual.</p>
+<p>Can emit new constraints: useful for custom type errors. This is quite different from how GHC usually works: it never emits constraints when rewriting.</p>
+</aside>
+</section>
+<section id="section" class="slide level2">
+<h2></h2>
+<p align="center">
+<img src=GHC_Tc_state_machine_HIW_2.svg height="550px" />
+</p>
+<aside class="notes">
+<p>What calls <code>tcPluginRewrite</code>? Mainly constraint canonicalisation, but also type normalisation in the pattern match checker.</p>
+</aside>
+</section>
+<section id="stephanie-weirichs-challenge" class="slide level2">
+<h2>Stephanie Weirich’s challenge</h2>
+<p><br /></p>
+<p>Stephanie Weirich posed the challenge of implementing implement a strongly-typed representation of System F. <a href="https://www.youtube.com/watch?v=j2xYSxMkXeQ">[Talk]</a> <a href="https://github.com/sweirich/challenge/">[GitHub]</a></p>
+<div class="element: fragment">
+<div class="sourceCode" id="cb9"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="co">-- | A term, in the given context, of the given type.</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Term</span> ϕ a <span class="kw">where</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>  <span class="co">-- | Function application.</span></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a><span class="ot">  (:$) ::</span> <span class="dt">Term</span> ϕ (a <span class="op">:-&gt;</span> b) <span class="ot">-&gt;</span> <span class="dt">Term</span> ϕ a <span class="ot">-&gt;</span> <span class="dt">Term</span> ϕ b</span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>  <span class="co">-- | Type application.</span></span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a><span class="ot">  (:@) ::</span> <span class="dt">Term</span> ϕ (<span class="dt">Forall</span> ty) <span class="ot">-&gt;</span> <span class="dt">Sing</span> a <span class="ot">-&gt;</span> <span class="dt">Term</span> ϕ (<span class="dt">SubOne</span> a ty)</span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>  <span class="co">-- Elided: variables, literals, Lambda abstraction, Big Lambda.</span></span></code></pre></div>
+</div>
+<aside class="notes">
+<p>Just giving the flavour for now; full code linked at the end.</p>
+<p>Standard System F AST, except we annotate terms by a context and a type, to ensure things are well-scoped and well-typed.</p>
+<p>Uses de Bruijn indices, but has two different successors: for kind and type extension, respectively.</p>
+</aside>
+</section>
+<section id="type-level-substitution" class="slide level2">
+<h2>Type-level substitution</h2>
+<div class="element: fragment">
+<div class="sourceCode" id="cb10"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> <span class="dt">ApplySub</span> <span class="ot">::</span></span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">forall</span> (kϕ<span class="ot"> ::</span> <span class="dt">KContext</span>) (kψ<span class="ot"> ::</span> <span class="dt">KContext</span>) (<span class="ot">k ::</span> <span class="dt">Kind</span>)<span class="op">.</span></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Sub</span> kϕ kψ <span class="ot">-&gt;</span> <span class="dt">Type</span> kϕ k <span class="ot">-&gt;</span> <span class="dt">Type</span> kψ k</span></code></pre></div>
+</div>
+<div class="sourceCode" id="cb11"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Apply a substitution to a type.</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> <span class="kw">family</span> <span class="dt">ApplySub</span> s ty <span class="kw">where</span> {<span class="op">..</span>}</span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Substitute a single type.</span></span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> <span class="dt">SubOne</span> a b <span class="ot">=</span> <span class="dt">ApplySub</span> (<span class="dt">&#39;Extend</span> <span class="dt">&#39;Id</span> a) b</span></code></pre></div>
+<aside class="notes">
+<p>Explain that we have a declarative language of renamings and substitutions:</p>
+<ul>
+<li>identity</li>
+<li>composition</li>
+<li>extend a composition with a type</li>
+<li>rename when creating a new binder</li>
+<li>substitute under a binder</li>
+</ul>
+</aside>
+</section>
+<section id="problem" class="slide level2">
+<h2>Problem</h2>
+<div class="sourceCode" id="cb12"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a><span class="dt">ApplySub</span> s (<span class="dt">ApplySub</span> t a) <span class="op">~</span> <span class="dt">ApplySub</span> (<span class="dt">&#39;Compose</span> s t) a</span></code></pre></div>
+<div class="element: fragment">
+<p>Type family argument on the LHS of a type family equation.</p>
+</div>
+<p><br /></p>
+<div class="element: fragment">
+<p>Might also need to use Givens:</p>
+<div class="sourceCode" id="cb13"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>[<span class="dt">G</span>] <span class="dt">ApplySub</span> t a <span class="op">~</span> f</span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a><span class="dt">ApplySub</span> s f</span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a>  <span class="op">~~&gt;</span></span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">ApplySub</span> (<span class="dt">&#39;Compose</span> s t) a</span></code></pre></div>
+</div>
+</section>
+<section id="rewriting-plugin" class="slide level2">
+<h2>Rewriting plugin</h2>
+<div class="element: fragment">
+<div class="sourceCode" id="cb14"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a><span class="ot">pluginRewrite ::</span> <span class="dt">PluginDefs</span> <span class="ot">-&gt;</span> <span class="dt">UniqFM</span> <span class="dt">TyCon</span> <span class="dt">TcPluginRewriter</span></span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>pluginRewrite defs<span class="op">@</span>( <span class="dt">PluginDefs</span> { applySubTyCon } ) <span class="ot">=</span></span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>  listToUFM</span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>    [ ( applySubTyCon, rewriter defs ) ]</span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a><span class="ot">rewriter ::</span> <span class="dt">PluginDefs</span></span>
+<span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a>         <span class="ot">-&gt;</span> [ <span class="dt">Ct</span> ]     <span class="co">-- Givens</span></span>
+<span id="cb14-9"><a href="#cb14-9" aria-hidden="true" tabindex="-1"></a>         <span class="ot">-&gt;</span> [ <span class="dt">Type</span> ]   <span class="co">-- Arguments to ApplySub</span></span>
+<span id="cb14-10"><a href="#cb14-10" aria-hidden="true" tabindex="-1"></a>         <span class="ot">-&gt;</span> <span class="dt">TcPluginM</span> <span class="dt">TcPluginRewriteResult</span></span>
+<span id="cb14-11"><a href="#cb14-11" aria-hidden="true" tabindex="-1"></a>rewriter defs givens [ kϕ, kψ, k, subst, subst_arg ]</span>
+<span id="cb14-12"><a href="#cb14-12" aria-hidden="true" tabindex="-1"></a>  <span class="ot">=</span> finish <span class="op">$</span> rwApplySub kϕ kψ k subst subst_arg</span></code></pre></div>
+</div>
+<aside class="notes">
+<p>PluginDefs is this plugin’s choice of <code>s</code> (from before).</p>
+<p>Review UniqFM: a map from a type-family TyCon to its rewriting function.</p>
+<p>Take a moment to recall how it used to be done: have to traverse all the constraints to find type-family applications, and then figure out how to rewrite each overall constraint over an inner type family reduction.</p>
+</aside>
+</section>
+<section id="section-1" class="slide level2">
+<h2></h2>
+<div class="sourceCode" id="cb15"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>finish <span class="op">$</span> rwApplySub kϕ kψ k subst subst_arg</span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>  <span class="kw">where</span></span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>  finish (<span class="dt">Just</span> ty) <span class="ot">=</span> <span class="dt">TcPluginRewriteTo</span> (mkReduction ty) []</span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>  finish <span class="dt">Nothing</span>   <span class="ot">=</span> <span class="dt">TcPluginNoRewrite</span></span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a><span class="ot">  rwApplySub ::</span> <span class="dt">Type</span> <span class="ot">-&gt;</span> <span class="dt">Type</span> <span class="ot">-&gt;</span> <span class="dt">Type</span> <span class="ot">-&gt;</span> <span class="dt">Type</span> <span class="ot">-&gt;</span> <span class="dt">Type</span></span>
+<span id="cb15-8"><a href="#cb15-8" aria-hidden="true" tabindex="-1"></a>             <span class="ot">-&gt;</span> <span class="dt">Maybe</span> <span class="dt">Type</span></span>
+<span id="cb15-9"><a href="#cb15-9" aria-hidden="true" tabindex="-1"></a>  rwApplySub kϕ kψ k sub sub_arg <span class="ot">=</span> <span class="op">...</span></span></code></pre></div>
+<div class="element: fragment">
+<div class="sourceCode" id="cb16"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>[<span class="dt">G</span>] <span class="dt">SubApply</span> kϕ0 kϕ l s a <span class="op">~</span> sub_arg</span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>rwApplySub kϕ kψ k sub sub_arg</span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>  <span class="op">~~&gt;</span></span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">Just</span> <span class="op">$</span> mkTyConApp composeTyCon [kϕ0, kϕ, kψ, sub, s]</span></code></pre></div>
+</div>
+<aside class="notes">
+<p>Extra arguments: invisible arguments. They correspond to the forall in the standalone kind signature of <code>ApplySub</code>.</p>
+<p>Note that this is all totally untyped: Type -&gt; Type -&gt; … Easy to mix up arguments.</p>
+<p>Main tools for debugging: Core Lint, tc-trace. Explained in more detail in my library, and upcoming blog post.</p>
+</aside>
+</section>
+<section id="type-checking-plugins-in-practice" class="slide level2">
+<h2>Type-checking plugins in practice?</h2>
+<div class="element: fragment">
+<p align="center">
+<svg version="1.1" id="svg56507" xml:space="preserve" width="639.56335" height="526.78101" viewBox="0 0 639.56335 526.78101" sodipodi:docname="tcplugins_cpp.svg" inkscape:version="1.1 (c68e22c387, 2021-05-23)" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg">
+<sodipodi:namedview
+     id="namedview367"
+     pagecolor="#505050"
+     bordercolor="#ffffff"
+     borderopacity="1"
+     inkscape:pageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="1"
+     showgrid="false"
+     inkscape:zoom="0.90509668"
+     inkscape:cx="348.58155"
+     inkscape:cy="292.23398"
+     inkscape:window-width="2560"
+     inkscape:window-height="1377"
+     inkscape:window-x="-8"
+     inkscape:window-y="464"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="g56513"
+     fit-margin-top="0"
+     fit-margin-left="0"
+     fit-margin-right="0"
+     fit-margin-bottom="0" /><defs
+     id="defs56511" /><g
+     id="g56513"
+     transform="translate(175.58246,-277.19226)"><rect
+       style="fill:#ececec;fill-opacity:1;stroke:none;stroke-width:15.0002;stroke-linecap:round;stroke-linejoin:bevel;stroke-dashoffset:7.2;paint-order:fill markers stroke"
+       id="rect87717"
+       width="639.56335"
+       height="526.78101"
+       x="-175.58246"
+       y="277.19226" /><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#833f7b;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text56561"
+       x="99.361618"
+       y="73.600929"><tspan
+         x="99.361618 102.23846"
+         y="73.600929"
+         id="tspan56559"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text56753"
+       x="161.44299"
+       y="149.92166"><tspan
+         x="161.44299 164.31984"
+         y="149.92166"
+         id="tspan56751"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text56825"
+       x="227.84351"
+       y="161.60213"><tspan
+         x="227.84351 230.85954"
+         y="161.60213"
+         id="tspan56823"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text56939"
+       x="187.52254"
+       y="185.12219"><tspan
+         x="187.52254 190.39938"
+         y="185.12219"
+         id="tspan56937"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text56963"
+       x="253.92303"
+       y="185.12219"><tspan
+         x="253.92303 256.79987"
+         y="185.12219"
+         id="tspan56961"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text57077"
+       x="196.16318"
+       y="208.64375"><tspan
+         x="196.16318 199.04001"
+         y="208.64375"
+         id="tspan57075"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text57185"
+       x="184.64333"
+       y="249.60422"><tspan
+         x="184.64333 187.52016"
+         y="249.60422"
+         id="tspan57183"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text57209"
+       x="245.28391"
+       y="249.60422"><tspan
+         x="245.28391 248.16074"
+         y="249.60422"
+         id="tspan57207"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#4c9e16;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text57263"
+       x="149.92166"
+       y="261.44232"><tspan
+         x="149.92166 152.79849"
+         y="261.44232"
+         id="tspan57261"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#4c9e16;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text57299"
+       x="213.44295"
+       y="261.44232"><tspan
+         x="213.44295 216.31978"
+         y="261.44232"
+         id="tspan57297"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text57377"
+       x="204.80231"
+       y="279.04333"><tspan
+         x="204.80231 207.67915"
+         y="279.04333"
+         id="tspan57375"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text57485"
+       x="213.44295"
+       y="314.24387"><tspan
+         x="213.44295 216.31978"
+         y="314.24387"
+         id="tspan57483"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text57497"
+       x="230.88185"
+       y="314.24387"><tspan
+         x="230.88185 233.75868 236.63553"
+         y="314.24387"
+         id="tspan57495"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text57551"
+       x="167.20143"
+       y="331.84488"><tspan
+         x="167.20143 170.07826"
+         y="331.84488"
+         id="tspan57549"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text57599"
+       x="184.64333"
+       y="343.52386"><tspan
+         x="184.64333 187.52016"
+         y="343.52386"
+         id="tspan57597"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text57611"
+       x="201.9231"
+       y="343.52386"><tspan
+         x="201.9231 204.79993 207.67677"
+         y="343.52386"
+         id="tspan57609"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text57653"
+       x="172.96284"
+       y="349.44443"><tspan
+         x="172.96284 175.83969"
+         y="349.44443"
+         id="tspan57651"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text57761"
+       x="172.96284"
+       y="384.64493"><tspan
+         x="172.96284 175.83969"
+         y="384.64493"
+         id="tspan57759"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text57965"
+       x="207.68153"
+       y="454.88538"><tspan
+         x="207.68153 210.55836"
+         y="454.88538"
+         id="tspan57963"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text58043"
+       x="178.72276"
+       y="472.48639"><tspan
+         x="178.72276 181.73882"
+         y="472.48639"
+         id="tspan58041"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text58067"
+       x="236.64326"
+       y="472.48639"><tspan
+         x="236.64326 239.5201"
+         y="472.48639"
+         id="tspan58065"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text58109"
+       x="201.9231"
+       y="478.40698"><tspan
+         x="201.9231 204.79993"
+         y="478.40698"
+         id="tspan58107"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#000000;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text58199"
+       x="167.20143"
+       y="496.00647"><tspan
+         x="167.20143 170.07826"
+         y="496.00647"
+         id="tspan58197"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#4c9e16;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text58319"
+       x="149.92166"
+       y="548.48682"><tspan
+         x="149.92166 152.79849"
+         y="548.48682"
+         id="tspan58317"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#4c9e16;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text58355"
+       x="213.44295"
+       y="548.48682"><tspan
+         x="213.44295 216.31978"
+         y="548.48682"
+         id="tspan58353"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#4c9e16;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text58517"
+       x="149.92166"
+       y="601.28833"><tspan
+         x="149.92166 152.79849"
+         y="601.28833"
+         id="tspan58515"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><text
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:4.64006px;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';writing-mode:lr-tb;fill:#4c9e16;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.014872"
+       id="text58553"
+       x="213.44295"
+       y="601.28833"><tspan
+         x="213.44295 216.31978"
+         y="601.28833"
+         id="tspan58551"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code';stroke-width:0.014872" /></text><g
+       id="g93461"
+       transform="translate(-2.7652617)"><text
+         xml:space="preserve"
+         style="font-weight:bold;font-size:5.48034px;line-height:1.45;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Bold';text-align:center;letter-spacing:0px;word-spacing:0px;text-anchor:middle;stroke-width:1"
+         x="148.79193"
+         y="-160.09645"
+         id="text5173-6"><tspan
+           sodipodi:role="line"
+           id="tspan60483"
+           x="0"
+           y="0"><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="148.79193"
+             y="221.33521"
+             id="tspan5269-0" /></tspan><tspan
+           sodipodi:role="line"
+           id="tspan60485"
+           x="148.79193"
+           y="316.69312"><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="316.69312"
+             id="tspan60487"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan60625">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan400556-2">TcPluginM</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan401686-4">TcPluginM</tspan>, tcPluginTrace, tcPluginIO)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="324.63959"
+             id="tspan5295-5"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan227068-9">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan399722-0">Type</tspan></tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="332.58612"
+             id="tspan5297-1"> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan398604-7">Kind</tspan>, <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan397043-1">PredType</tspan>, eqType, mkTyVarTy, tyConAppTyCon_maybe)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="340.53259"
+             id="tspan5299-4"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan227890-7">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan395019-1">TysWiredIn</tspan> (typeNatKind)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="348.47906"
+             id="tspan5303-9"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan228740-4">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan391008-5">Coercion</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan393206-7">CoercionHole</tspan>, <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan393796-8">Role</tspan> (..), mkUnivCo)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="356.4256"
+             id="tspan5305-0"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan229858-5">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan390250-7">Class</tspan> (className)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="364.37207"
+             id="tspan5307-3"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan230652-0">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan389340-8">TcPluginM </tspan> (newCoercionHole, tcLookupClass, newEvVar)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="372.31854"
+             id="tspan5309-7"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan231590-6">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan385590-9">TcRnTypes </tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan386532-7">TcPlugin</tspan> (..), <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan387122-4">TcPluginResult</tspan>(..))</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="380.26508"
+             id="tspan5311-0"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan233404-9">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan383918-2">TyCoRep</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan384536-8">UnivCoProvenance</tspan> (..))</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="388.21155"
+             id="tspan5313-5"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan234182-8">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan382660-3">TcType</tspan> (isEqPred)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="396.15802"
+             id="tspan5315-2"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan236128-8">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan381260-6">TyCon</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan380610-2">TyCon</tspan>)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="404.10455"
+             id="tspan5317-1"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan236914-4">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan378072-0">TyCoRep</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan378922-8">Type</tspan> (..))</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="412.05103"
+             id="tspan5319-2"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan237788-5">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan376974-7">TcTypeNats</tspan> (typeNatAddTyCon, typeNatExpTyCon, typeNatMulTyCon,</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="419.9975"
+             id="tspan5321-8"> typeNatSubTyCon)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="427.94403"
+             id="tspan5325-1"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan239754-1">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan376080-6">TcTypeNats</tspan> (typeNatLeqTyCon)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="435.8905"
+             id="tspan5327-6"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan240732-3">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan375414-5">TysWiredIn</tspan> (promotedFalseDataCon, promotedTrueDataCon)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="148.79193"
+             y="443.83698"
+             id="tspan5331-7">#if MIN_VERSION_ghc(8,10,0)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="451.78351"
+             id="tspan5333-8"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan241338-5">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan369557-9">Constraint</tspan></tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="459.72998"
+             id="tspan5335-8"> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan365853-0">Ct</tspan>, <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan366663-1">CtEvidence</tspan> (..), <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan367641-3">CtLoc</tspan>, <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan427964-2">TcEvDest</tspan> (..), ctEvidence, ctEvLoc, ctEvPred,</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="467.67645"
+             id="tspan5337-1"> ctLoc, ctLocSpan, isGiven, isWanted, mkNonCanonical, setCtLoc, setCtLocSpan,</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="475.62299"
+             id="tspan5339-8"> isWantedCt)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="483.56946"
+             id="tspan5341-9"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan242744-1">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan359872-3">Predicate</tspan></tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="491.51599"
+             id="tspan5343-8"> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan361442-7">EqRel</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan362955-8">NomEq</tspan>), <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan363813-0">Pred</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan364655-4">EqPred</tspan>), classifyPredType, getEqPredTys, mkClassPred,</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="499.46246"
+             id="tspan5345-5"> mkPrimEqPred, getClassPredTys_maybe)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="507.40894"
+             id="tspan5347-7"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan243794-6">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan339964-7">Type</tspan> (typeKind)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="148.79193"
+             y="515.35547"
+             id="tspan5349-0">#else</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="523.30194"
+             id="tspan5351-2"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan244196-9">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan339270-5">TcRnTypes</tspan></tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="531.24841"
+             id="tspan5353-8"> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan334603-4">Ct</tspan>, <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan335521-1">CtEvidence </tspan>(..), <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan336491-6">CtLoc</tspan>, <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan337409-0">TcEvDest</tspan> (..), ctEvidence, ctEvLoc, ctEvPred,</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="539.19495"
+             id="tspan5355-6"> ctLoc, ctLocSpan, isGiven, isWanted, mkNonCanonical, setCtLoc, setCtLocSpan,</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="547.14142"
+             id="tspan5357-3"> isWantedCt)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="555.08789"
+             id="tspan5359-7"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan245802-8">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan333581-4">TcType</tspan> (typeKind)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="563.03442"
+             id="tspan5361-9"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan246844-1">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan326287-8">Type</tspan></tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="570.9809"
+             id="tspan5363-3"> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan325405-6">EqRel</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan329757-3">NomEq</tspan>), <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan327453-4">PredTree</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan328975-1">EqPred</tspan>), classifyPredType, mkClassPred, mkPrimEqPred,</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="578.92737"
+             id="tspan5365-2"> getClassPredTys_maybe)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="148.79193"
+             y="586.8739"
+             id="tspan5367-8">#if MIN_VERSION_ghc(8,4,0)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="594.82037"
+             id="tspan5369-4"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan247538-6">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan323911-4">Type</tspan> (getEqPredTys)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="148.79193"
+             y="602.76685"
+             id="tspan5371-0">#endif</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="148.79193"
+             y="610.71338"
+             id="tspan5373-3">#endif</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="148.79193"
+             y="618.65985"
+             id="tspan5377-9">#if MIN_VERSION_ghc(8,10,0)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="626.60632"
+             id="tspan5379-3"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan248948-1">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan322169-0">Constraint</tspan> (ctEvExpr)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="148.79193"
+             y="634.55286"
+             id="tspan5381-7">#elif MIN_VERSION_ghc(8,6,0)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="642.49933"
+             id="tspan5383-3"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan249950-6">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan321463-7">TcRnTypes</tspan> (ctEvExpr)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="148.79193"
+             y="650.4458"
+             id="tspan5385-0">#else</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="658.39233"
+             id="tspan5387-6"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan250404-5">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan320741-4">TcRnTypes</tspan> (ctEvTerm)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="148.79193"
+             y="666.33881"
+             id="tspan5389-5">#endif</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="148.79193"
+             y="674.28528"
+             id="tspan5393-3">#if MIN_VERSION_ghc(8,2,0)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="148.79193"
+             y="682.23181"
+             id="tspan5395-2">#if MIN_VERSION_ghc(8,10,0)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="690.17828"
+             id="tspan5397-8"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan213148-4">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan317154-4">Constraint</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan316532-7">ShadowInfo</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan315510-1">WDeriv</tspan>))</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="148.79193"
+             y="698.12482"
+             id="tspan5399-5">#else</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="706.07129"
+             id="tspan5401-0"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan211382-6">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan312804-4">TcRnTypes</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan313578-6">ShadowInfo</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan314432-2">WDeriv</tspan>))</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="148.79193"
+             y="714.0177"
+             id="tspan5403-0">#endif</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="148.79193"
+             y="721.96436"
+             id="tspan5405-4">#endif</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="148.79193"
+             y="729.91077"
+             id="tspan5409-8">#if MIN_VERSION_ghc(8,10,0)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="148.79193"
+             y="737.8573"
+             id="tspan5411-3"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan210740-0">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan311690-6">TcType</tspan> (isEqPrimPred)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="148.79193"
+             y="745.80383"
+             id="tspan5413-8">#endif</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="148.79193"
+             y="753.75018"
+             id="tspan5415-2">#endif</tspan></tspan></text><text
+         xml:space="preserve"
+         style="font-weight:bold;font-size:5.48034px;line-height:1.45;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Bold';text-align:center;letter-spacing:0px;word-spacing:0px;text-anchor:middle;stroke-width:1"
+         x="-138.86426"
+         y="300.41788"
+         id="text5173-6-2"><tspan
+           sodipodi:role="line"
+           id="tspan39360"
+           x="-138.86426"
+           y="300.41788"><tspan
+             id="tspan5171-8-2"
+             style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Bold';text-align:start;text-anchor:start;fill:#c05db3;fill-opacity:1;stroke-width:1"
+             x="-138.86426"
+             y="300.41788">– GHC API</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="-138.86426"
+             y="308.36435"
+             id="tspan5175-5-8">#if MIN_VERSION_ghc(9,0,0)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="316.31082"
+             id="tspan5177-6-4"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan143497-9-3">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan253305-9-9">GHC.Builtin.Names</tspan> (knownNatClassName, eqTyConKey, heqTyConKey, hasKey)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="324.25735"
+             id="tspan5179-1-1"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan155023-9-1">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan254851-9-1">GHC.Builtin.Types</tspan> (promotedFalseDataCon, promotedTrueDataCon)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="332.20383"
+             id="tspan5181-3-2"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan167597-4-6">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan256157-2-8">GHC.Builtin.Types.Literals</tspan></tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="340.15033"
+             id="tspan5183-2-4"> (typeNatAddTyCon, typeNatExpTyCon, typeNatMulTyCon, typeNatSubTyCon)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="-138.86426"
+             y="348.0968"
+             id="tspan5185-0-6">#if MIN_VERSION_ghc(9,2,0)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="356.0433"
+             id="tspan5187-6-1"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan168979-9-7">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan256995-0-7">GHC.Builtin.Types</tspan> (naturalTy)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="363.98981"
+             id="tspan5189-3-9"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan170361-3-7">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan258053-5-0">GHC.Builtin.Types.Literals</tspan> (typeNatCmpTyCon)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="-138.86426"
+             y="371.93631"
+             id="tspan5191-0-5">#else</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="379.88281"
+             id="tspan5193-2-3"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan172347-0-1">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan260615-9-7">GHC.Builtin.Types</tspan> (typeNatKind)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="387.82928"
+             id="tspan5195-4-5"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan173065-0-2">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan261933-2-8">GHC.Builtin.Types.Literals</tspan> (typeNatLeqTyCon)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="-138.86426"
+             y="395.77579"
+             id="tspan5197-6-4">#endif</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="403.72229"
+             id="tspan5199-2-3"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan174715-6-2">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan263107-7-3">GHC.Core</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan265761-1-2">Expr</tspan> (..))</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="411.66876"
+             id="tspan5201-6-8"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan175525-9-1">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan266695-2-7">GHC.Core.Class</tspan> (className)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="419.61523"
+             id="tspan5203-2-0"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan176083-9-9">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan270763-7-1">GHC.Core.Coercion</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan271489-0-4">CoercionHole</tspan>, <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan268293-8-2">Role</tspan> (..), mkUnivCo)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="427.56174"
+             id="tspan5205-4-3"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan185941-0-9">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan271947-5-6">GHC.Core.Predicate</tspan></tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="435.50824"
+             id="tspan5207-5-5"> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan273597-3-0">EqRel</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan274555-0-2">NomEq</tspan>), <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan275229-3-6">Pred</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan276295-2-9">EqPred</tspan>), classifyPredType, getEqPredTys, mkClassPred,</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="443.45474"
+             id="tspan5209-1-8"> mkPrimEqPred, isEqPred, isEqPrimPred, getClassPredTys_maybe)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="451.40121"
+             id="tspan5211-2-4"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan186795-5-7">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan277093-3-9">GHC.Core.TyCo.Rep</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan277959-1-9">Type</tspan> (..), <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan278665-2-1">UnivCoProvenance</tspan> (..))</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="459.34772"
+             id="tspan5213-9-5"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan187633-0-1">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan284333-4-9">GHC.Core.TyCon</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan285243-3-7">TyCon</tspan>)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="467.29422"
+             id="tspan5215-9-1"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan189747-4-0">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan287113-5-6">GHC.Core.Type</tspan></tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="475.24069"
+             id="tspan5217-7-9"> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan287811-2-2">Kind</tspan>, <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan288813-7-2">PredType</tspan>, eqType, mkTyVarTy, tyConAppTyCon_maybe, typeKind)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="483.18719"
+             id="tspan5219-0-2"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan190549-9-4">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan289547-0-9">GHC.Driver.Plugins</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan290469-9-5">Plugin</tspan> (..), defaultPlugin, purePlugin)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="491.1337"
+             id="tspan5221-5-8"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan191175-0-1">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan291343-3-0">GHC.Tc.Plugin</tspan></tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="499.08017"
+             id="tspan5223-2-1"> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan292001-3-7">TcPluginM</tspan>, newCoercionHole, tcLookupClass, tcPluginTrace, tcPluginIO,</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="507.02667"
+             id="tspan5225-2-2"> newEvVar)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="-138.86426"
+             y="514.97314"
+             id="tspan5227-4-1">#if MIN_VERSION_ghc(9,2,0)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="522.91968"
+             id="tspan5229-0-1"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan192957-0-9">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan294191-7-4">GHC.Tc.Plugin</tspan> (tcLookupTyCon)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="-138.86426"
+             y="530.86615"
+             id="tspan5231-5-8">#endif</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="538.81268"
+             id="tspan5233-2-5"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan193891-1-8">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan295045-9-8">GHC.Tc.Types</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan295895-8-3">TcPlugin</tspan> (..), <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan296481-9-2">TcPluginResult</tspan> (..))</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="546.75916"
+             id="tspan5235-7-9"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan197178-7-7">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan300586-9-6">GHC.Tc.Types.Constraint</tspan></tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="554.70563"
+             id="tspan5237-4-3"> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan302344-1-4">Ct</tspan>, <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan303714-8-3">CtEvidence</tspan> (..), <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan304908-7-2">CtLoc</tspan>, <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan305814-1-3">TcEvDest</tspan> (..), <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan306760-8-9">ShadowInfo</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan307306-3-7">WDeriv</tspan>), ctEvidence,</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="562.65216"
+             id="tspan5239-0-5"> ctLoc, ctLocSpan, isGiven, isWanted, mkNonCanonical, setCtLoc, setCtLocSpan,</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="570.59863"
+             id="tspan5241-4-2"> isWantedCt, ctEvLoc, ctEvPred, ctEvExpr)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="578.54517"
+             id="tspan5243-2-3"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan199096-2-5">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan343299-8-1">GHC.Tc.Types.Evidence</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan344201-3-0">EvTerm</tspan> (..), evCast, evId)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="-138.86426"
+             y="586.49164"
+             id="tspan5245-4-1">#if MIN_VERSION_ghc(9,2,0)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="594.43811"
+             id="tspan5247-1-2"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan199942-9-7">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan346047-2-1">GHC.Data.FastString</tspan> (fsLit)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="602.38464"
+             id="tspan5249-0-4"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan202348-1-6">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan347337-0-1">GHC.Types.Name.Occurrence</tspan> (mkTcOcc)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="610.33112"
+             id="tspan5251-8-1"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan203250-5-4">import</tspan><tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan348823-1-8"> GHC.Unit.Module</tspan> (mkModuleName)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="-138.86426"
+             y="618.27759"
+             id="tspan5253-9-3">#endif</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="626.22412"
+             id="tspan5255-6-5"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan204012-3-4">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan350381-0-5">GHC.Utils.Outputable</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan350919-9-5">Outputable</tspan> (..), (<tspan
+   style="fill:#4c9e16;fill-opacity:1;stroke-width:1"
+   id="tspan414456-3-0">&lt;+&gt;</tspan>), (<tspan
+   style="fill:#4c9e16;fill-opacity:1"
+   id="tspan28095-4">&lt;&gt;</tspan>), text)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="-138.86426"
+             y="634.17059"
+             id="tspan5257-3-0">#else</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="-138.86426"
+             y="642.11707"
+             id="tspan5259-5-6">#if MIN_VERSION_ghc(8,5,0)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="650.0636"
+             id="tspan5261-8-2"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan206442-9-1">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan353157-1-4">CoreSyn</tspan> (Expr (..))</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="-138.86426"
+             y="658.01007"
+             id="tspan5263-9-5">#endif</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="665.95654"
+             id="tspan5265-9-1"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan207024-9-0">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan353995-8-1">Outputable </tspan>(<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan354801-5-8">Outputable</tspan> (..), (<tspan
+   style="fill:#4c9e16;fill-opacity:1;stroke-width:1"
+   id="tspan422136-7-8">&lt;+&gt;</tspan>), (<tspan
+   style="fill:#4c9e16;fill-opacity:1"
+   id="tspan28505-7">&lt;&gt;</tspan>), text)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="673.90308"
+             id="tspan5267-4-8"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan207846-8-4">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan355787-2-7">Plugins</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan356509-8-7">Plugin</tspan> (..), defaultPlugin)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="-138.86426"
+             y="681.84955"
+             id="tspan5269-0-1">#if MIN_VERSION_ghc(8,6,0)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="689.79602"
+             id="tspan5271-3-8"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan215398-4-4">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan404870-2-4">Plugins</tspan> (purePlugin)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="-138.86426"
+             y="697.74255"
+             id="tspan5273-8-1">#endif</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="705.68903"
+             id="tspan5275-0-2"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan220752-7-9">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan405772-8-4">PrelNames</tspan> (hasKey, knownNatClassName)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="713.6355"
+             id="tspan5277-6-5"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan219718-2-8">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan406594-0-8">PrelNames</tspan> (eqTyConKey, heqTyConKey)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="721.58203"
+             id="tspan5279-9-8"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan218852-8-5">import </tspan><tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan407660-9-5">TcEvidence</tspan> (<tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan408654-6-3">EvTerm</tspan> (..))</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="-138.86426"
+             y="729.5285"
+             id="tspan5281-3-8">#if MIN_VERSION_ghc(8,6,0)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="737.47498"
+             id="tspan5283-7-6"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan222494-6-0">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan409388-1-5">TcEvidence</tspan> (evCast, evId)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="-138.86426"
+             y="745.42151"
+             id="tspan5285-6-5">#endif</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="-138.86426"
+             y="753.36798"
+             id="tspan5287-7-6">#if !MIN_VERSION_ghc(8,4,0)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="761.31445"
+             id="tspan5289-1-6"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan223716-7-8">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan402428-0-6">TcPluginM</tspan> (zonkCt)</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Semi-Bold';text-align:start;text-anchor:start;fill:#bc7a00;fill-opacity:1;stroke-width:1"
+             x="-138.86426"
+             y="769.26099"
+             id="tspan5291-9-9">#endif</tspan><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="777.20746"
+             id="tspan5293-4-3"><tspan
+               style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+               id="tspan400556-2-3"></tspan></tspan></tspan><tspan
+           sodipodi:role="line"
+           id="tspan39362"
+           x="-138.86426"
+           y="308.36438"><tspan
+             style="font-style:normal;font-variant:normal;font-weight:500;font-stretch:normal;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Medium';text-align:start;text-anchor:start;stroke-width:1"
+             x="-138.86426"
+             y="777.20746"
+             id="tspan39364"><tspan
+               style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+               id="tspan39502"></tspan></tspan></tspan><tspan
+           sodipodi:role="line"
+           x="-138.86426"
+           y="316.31085"
+           id="tspan40265" /></text></g><g
+       id="g90173"
+       class="fragment"
+       transform="matrix(1.9206515,0,0,0.69687341,-328.56361,262.65944)"
+       style="stroke-width:0.864368"><path
+         style="fill:none;stroke:#ac1010;stroke-width:8.64368;stroke-linecap:round;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+         d="M 354.54513,89.276229 121.08809,714.6508"
+         id="path89790" /><path
+         style="fill:none;stroke:#ac1010;stroke-width:8.64368;stroke-linecap:round;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+         d="M 121.08809,89.276229 354.54513,714.6508"
+         id="path90169" /></g><g
+       id="g102727"
+       class="fragment"
+       transform="translate(-109.15537,133.57576)"><rect
+         style="fill:#ffffff;fill-opacity:1;stroke:#000000;stroke-width:6;stroke-linecap:round;stroke-linejoin:bevel;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:7.2;stroke-opacity:1;paint-order:fill markers stroke"
+         id="rect102335"
+         width="449.28748"
+         height="81.64949"
+         x="12.710854"
+         y="370.85504" /><text
+         xml:space="preserve"
+         style="font-weight:bold;font-size:28.0228px;line-height:1.45;font-family:'Fira Code';-inkscape-font-specification:'Fira Code Bold';text-align:center;letter-spacing:0px;word-spacing:0px;text-anchor:middle;stroke-width:1"
+         x="237.19649"
+         y="421.93695"
+         id="text91575"><tspan
+           id="tspan91573"
+           x="237.19649"
+           y="421.93695"
+           style="stroke-width:1"><tspan
+   style="fill:#ad1616;fill-opacity:1;stroke-width:1"
+   id="tspan96171">import</tspan> <tspan
+   style="fill:#1c72c4;fill-opacity:1;stroke-width:1"
+   id="tspan98997">GHC.TcPlugin.API</tspan></tspan></text></g></g>
+</svg>
+</p>
+</div>
+<aside class="notes">
+<p>Type-checking plugins manipulate GHC’s internal representation of types.</p>
+<p>We have access to pretty much of all of GHC! This means we need to know a lot about how GHC works.</p>
+<p>GHC’s typechecker changes quite regularly. For plugin authors, this usually means a large amount of CPP macros. The library should absorb the impact instead.</p>
+</aside>
+</section>
+<section id="typed-holes" class="slide level2">
+<h2>Typed holes</h2>
+<div class="sourceCode" id="cb17"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">GHC.TcPlugin.API</span></span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a><span class="co">-- Want to use a &#39;Coercion&#39; as equality constraint evidence.</span></span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a><span class="ot">help ::</span> <span class="dt">Coercion</span> <span class="ot">-&gt;</span> <span class="dt">EvTerm</span></span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a>help <span class="ot">=</span> _</span></code></pre></div>
+<div class="element: fragment">
+<pre><code>
+    * Found hole: _ :: Coercion -&gt; EvTerm
+    * Valid hole fits include
+        evCoercion :: Coercion -&gt; EvTerm</code></pre>
+</div>
+</section>
+<section id="typed-holes-2" class="slide level2">
+<h2>Typed holes (2)</h2>
+<div class="sourceCode" id="cb19"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">GHC.TcPlugin.API</span></span>
+<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a><span class="co">-- Want to apply a &#39;TyCon&#39; to arguments.</span></span>
+<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a><span class="ot">help ::</span> <span class="dt">TyCon</span> <span class="ot">-&gt;</span> [<span class="dt">Type</span>] <span class="ot">-&gt;</span> <span class="dt">Type</span></span>
+<span id="cb19-6"><a href="#cb19-6" aria-hidden="true" tabindex="-1"></a>help <span class="ot">=</span> _</span></code></pre></div>
+<div class="element: fragment">
+<pre><code>
+    * Found hole: _ :: TyCon -&gt; [Type] -&gt; Type
+    * Valid hole fits include
+        mkTyConApp :: TyCon -&gt; [Type] -&gt; Type</code></pre>
+</div>
+</section>
+<section id="hackage-documentation" class="slide level2">
+<h2>Hackage documentation</h2>
+<div class="element: fragment">
+<p align="center">
+<img src=ghc-tcplugin-api-hackage.png height="250px" />
+</p>
+</div>
+<div class="element: fragment">
+<p align="center">
+<img src=ghc-tcplugin-api-hackage-2.png height="250px" />
+</p>
+</div>
+<aside class="notes">
+<p>Snippets like these help users get started. Crucial middle-ground between high-level overviews and real-world code.</p>
+</aside>
+</section>
+<section id="custom-type-errors" class="slide level2">
+<h2>Custom type errors</h2>
+<p><br /></p>
+<p>Helpers for custom type errors.</p>
+<div class="element: fragment">
+<div class="sourceCode" id="cb21"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a><span class="ot">myErrMsg ::</span> <span class="dt">Type</span> <span class="ot">-&gt;</span> <span class="dt">TcPluginErrorMessage</span></span>
+<span id="cb21-3"><a href="#cb21-3" aria-hidden="true" tabindex="-1"></a>myErrMsg ty <span class="ot">=</span></span>
+<span id="cb21-4"><a href="#cb21-4" aria-hidden="true" tabindex="-1"></a>   <span class="dt">Txt</span> <span class="st">&quot;Couldn&#39;t handle type &quot;</span> <span class="op">:|:</span> <span class="dt">PrintType</span> ty <span class="op">:|:</span> <span class="dt">Txt</span> <span class="st">&quot;.&quot;</span></span>
+<span id="cb21-5"><a href="#cb21-5" aria-hidden="true" tabindex="-1"></a>  <span class="co">-- Same process as with the &#39;ErrorMessage&#39; data kind.</span></span>
+<span id="cb21-6"><a href="#cb21-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb21-7"><a href="#cb21-7" aria-hidden="true" tabindex="-1"></a><span class="ot">errorWantedCt ::</span> <span class="dt">MonadTcPluginWork</span> m <span class="ot">=&gt;</span> <span class="dt">CtLoc</span> <span class="ot">-&gt;</span> <span class="dt">Type</span> <span class="ot">-&gt;</span> m <span class="dt">Ct</span></span>
+<span id="cb21-8"><a href="#cb21-8" aria-hidden="true" tabindex="-1"></a>errorWantedCt loc ty <span class="ot">=</span></span>
+<span id="cb21-9"><a href="#cb21-9" aria-hidden="true" tabindex="-1"></a>   newWanted loc <span class="op">$</span> mkTcPluginErrorTy (myErrMsg ty)</span></code></pre></div>
+</div>
+<aside class="notes">
+<p>This is just one quality-of-life improvement offered by the library.</p>
+<p>It’s much easier to iterate and experiment with a library, rather than the API being tied to GHC and hard to change.</p>
+<p>Much more can be done! Suggestions welcome!</p>
+</aside>
+</section>
+<section id="available-now" class="slide level2">
+<h2>Available now!</h2>
+<p><br /></p>
+<div class="element: fragment">
+<p>Get your hands dirty: <a href="https://hackage.haskell.org/package/ghc-tcplugin-api"><code>ghc-tcplugin-api</code></a> on Hackage.</p>
+</div>
+<p><br /></p>
+<div class="element: fragment">
+<p>Type-family rewriting functionality in GHC 9.4.<br />
+Compatibility layer in <code>ghc-tcplugin-api</code> for GHC 9.0 and 9.2.</p>
+</div>
+<p><br /></p>
+<div class="element: fragment">
+<p>The <a href="https://github.com/sheaf/ghc-tcplugin-api">GitHub repository</a> contains full code for the System F example.</p>
+</div>
+<p><br /></p>
+<div class="element: fragment">
+<p>Upcoming Tweag blog post: writing and debugging a type-checking plugin.<br />
+In depth review of GHC constraint solving and type family reduction.</p>
+</div>
+<aside class="notes">
+<p>I extend my thanks to Richard Eisenberg, who generously provided me with a lot of help and high quality feedback. It’s been an absolute pleasure working with him.</p>
+</aside>
+</section>
+    </div>
+  </div>
+
+  <script src="reveal.js/dist/reveal.js"></script>
+
+  <!-- reveal.js plugins -->
+  <script src="reveal.js/plugin/notes/notes.js"></script>
+  <script src="reveal.js/plugin/search/search.js"></script>
+  <script src="reveal.js/plugin/zoom/zoom.js"></script>
+
+  <script>
+
+      // Full list of configuration options available at:
+      // https://revealjs.com/config/
+      Reveal.initialize({
+        // Display controls in the bottom right corner
+        controls: true,
+
+        // Help the user learn the controls by providing hints, for example by
+        // bouncing the down arrow when they first encounter a vertical slide
+        controlsTutorial: false,
+
+        // Determines where controls appear, "edges" or "bottom-right"
+        controlsLayout: 'edges',
+
+        // Visibility rule for backwards navigation arrows; "faded", "hidden"
+        // or "visible"
+        controlsBackArrows: 'faded',
+
+        // Display a presentation progress bar
+        progress: true,
+
+        // Display the page number of the current slide
+        slideNumber: 'c/t',
+
+        // 'all', 'print', or 'speaker'
+        showSlideNumber: 'all',
+
+        // Add the current slide number to the URL hash so that reloading the
+        // page/copying the URL will return you to the same slide
+        hash: false,
+
+        // Start with 1 for the hash rather than 0
+        hashOneBasedIndex: false,
+
+        // Flags if we should monitor the hash and change slides accordingly
+        respondToHashChanges: true,
+
+        // Push each slide change to the browser history
+        history: false,
+
+        // Enable keyboard shortcuts for navigation
+        keyboard: true,
+
+        // Enable the slide overview mode
+        overview: true,
+
+        // Disables the default reveal.js slide layout (scaling and centering)
+        // so that you can use custom CSS layout
+        disableLayout: false,
+
+        // Vertical centering of slides
+        center: true,
+
+        // Enables touch navigation on devices with touch input
+        touch: true,
+
+        // Loop the presentation
+        loop: false,
+
+        // Change the presentation direction to be RTL
+        rtl: false,
+
+        // see https://revealjs.com/vertical-slides/#navigation-mode
+        navigationMode: 'default',
+
+        // Randomizes the order of slides each time the presentation loads
+        shuffle: false,
+
+        // Turns fragments on and off globally
+        fragments: true,
+
+        // Flags whether to include the current fragment in the URL,
+        // so that reloading brings you to the same fragment position
+        fragmentInURL: true,
+
+        // Flags if the presentation is running in an embedded mode,
+        // i.e. contained within a limited portion of the screen
+        embedded: false,
+
+        // Flags if we should show a help overlay when the questionmark
+        // key is pressed
+        help: true,
+
+        // Flags if it should be possible to pause the presentation (blackout)
+        pause: true,
+
+        // Flags if speaker notes should be visible to all viewers
+        showNotes: false,
+
+        // Global override for autoplaying embedded media (null/true/false)
+        autoPlayMedia: null,
+
+        // Global override for preloading lazy-loaded iframes (null/true/false)
+        preloadIframes: null,
+
+        // Number of milliseconds between automatically proceeding to the
+        // next slide, disabled when set to 0, this value can be overwritten
+        // by using a data-autoslide attribute on your slides
+        autoSlide: 0,
+
+        // Stop auto-sliding after user input
+        autoSlideStoppable: true,
+
+        // Use this method for navigation when auto-sliding
+        autoSlideMethod: null,
+
+        // Specify the average time in seconds that you think you will spend
+        // presenting each slide. This is used to show a pacing timer in the
+        // speaker view
+        defaultTiming: null,
+
+        // Enable slide navigation via mouse wheel
+        mouseWheel: false,
+
+        // The display mode that will be used to show slides
+        display: 'block',
+
+        // Hide cursor if inactive
+        hideInactiveCursor: true,
+
+        // Time before the cursor is hidden (in ms)
+        hideCursorTime: 5000,
+
+        // Opens links in an iframe preview overlay
+        previewLinks: false,
+
+        // Transition style (none/fade/slide/convex/concave/zoom)
+        transition: 'slide',
+
+        // Transition speed (default/fast/slow)
+        transitionSpeed: 'default',
+
+        // Transition style for full page slide backgrounds
+        // (none/fade/slide/convex/concave/zoom)
+        backgroundTransition: 'fade',
+
+        // Number of slides away from the current that are visible
+        viewDistance: 3,
+
+        // Number of slides away from the current that are visible on mobile
+        // devices. It is advisable to set this to a lower number than
+        // viewDistance in order to save resources.
+        mobileViewDistance: 2,
+
+        // reveal.js plugins
+        plugins: [
+          RevealNotes,
+          RevealSearch,
+          RevealZoom
+        ]
+      });
+    </script>
+    </body>
+</html>
