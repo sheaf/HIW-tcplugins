@@ -92,7 +92,8 @@ Christiaan Baaij's `ghc-typelits-natnormalise` type-checker plugin can handle th
 <br />
 
 :::{.element: class="fragment"}
-**Row**: unordered association map, field name ⇝ type.  
+**Row**: unordered association map, field name ⇝ type, e.g.  
+`( "field1" :: Int, "field2" :: Bool )`.  
 Can be used to model extensible records (order doesn't matter).
 :::
 
@@ -162,25 +163,23 @@ Authors of type-checking plugins should be careful not to introduce non-confluen
 
 ## Type-checking plugins to the rescue
 
+:::{.element: class="fragment"}
 <p align="center">
 <img src=GHC_Tc_state_machine_HIW_1.svg height="550px" />
 </p>
+:::
 
 ::: notes
+
+We can hook into GHC's typechecker with typechecking plugins.
 
 LHS: GHC typechecker state machine. Start, type-checking loop, stop.
 
 RHS: type-checking plugin (TcPlugin datatype we are about to review).
 
 Review the existential `s` environment/state; plugin authors will already be familiar with this.
-The plugin author can choose this type; usually it will contain name information that is looked up
-on plugin initialisation.
 Initialisation gives us `s`, which we pass to the different stages (we only do this once).
 This initialises the various stages so that they are ready to be called by GHC.
-
-Briefly talk about the situations in which GHC calls `tcPluginSolve`
-(solving implications, ambiguity check, typechecking RULES, etc).
-Emphasise that it doesn't really matter.
 
 :::
 
@@ -341,14 +340,15 @@ ApplySub s f
 pluginRewrite :: PluginDefs -> UniqFM TyCon TcPluginRewriter
 pluginRewrite defs@( PluginDefs { applySubTyCon } ) =
   listToUFM
-    [ ( applySubTyCon, rewriter defs ) ]
+    [ ( applySubTyCon, rewriteApplySub defs ) ]
 
-rewriter :: PluginDefs
-         -> [ Ct ]     -- Givens
-         -> [ Type ]   -- Arguments to ApplySub
-         -> TcPluginM TcPluginRewriteResult
-rewriter defs givens [ kϕ, kψ, k, subst, subst_arg ]
-  = finish $ rwApplySub kϕ kψ k subst subst_arg
+rewriteApplySub
+  :: PluginDefs
+  -> [ Ct ]     -- Givens
+  -> [ Type ]   -- Arguments to ApplySub
+  -> TcPluginM TcPluginRewriteResult
+rewriteApplySub defs givens [ kϕ, kψ, k, sub, sub_arg ]
+  = ...
 ```
 :::
 
@@ -357,6 +357,9 @@ rewriter defs givens [ kϕ, kψ, k, subst, subst_arg ]
 PluginDefs is this plugin's choice of `s` (from before).
 
 Review UniqFM: a map from a type-family TyCon to its rewriting function.
+
+Extra arguments: invisible arguments. They correspond to the forall in the
+standalone kind signature of `ApplySub`.
 
 Take a moment to recall how it used to be done: have to traverse
 all the constraints to find type-family applications, and then
@@ -370,34 +373,29 @@ type family reduction.
 
 ```haskell
 
-finish $ rwApplySub kϕ kψ k subst subst_arg
-  where
-  finish (Just ty) = TcPluginRewriteTo (mkReduction ty) []
-  finish Nothing   = TcPluginNoRewrite
-
-  rwApplySub :: Type -> Type -> Type -> Type -> Type
-             -> Maybe Type
-  rwApplySub kϕ kψ k sub sub_arg = ...
+rewriteApplySub defs givens [ kϕ, kψ, k, sub, sub_arg ]
+  = ...
 ```
 
 :::{.element: class="fragment"}
 ```haskell
 
-[G] SubApply kϕ0 kϕ l s a ~ sub_arg
+[G] ApplySub kϕ0 kϕ l t a ~ sub_arg
 
-rwApplySub kϕ kψ k sub sub_arg
+rewriteApplySub defs givens [ kϕ, kψ, k, sub, sub_arg ]
   ~~>
-  Just $ mkTyConApp composeTyCon [kϕ0, kϕ, kψ, sub, s]
+  TcPluginRewriteTo
+    { tcPluginReduction =
+        mkPluginNomRedn "ApplySub s (ApplySub t a)" $
+          mkTyConApp composeTyCon [kϕ0, kϕ, kψ, sub, t]
+    , tcRewriterNewWanteds = [] }
 ```
 :::
 
 ::: notes
 
-Extra arguments: invisible arguments. They correspond to the forall in the
-standalone kind signature of `ApplySub`.
-
-Note that this is all totally untyped: Type -> Type -> ...
-Easy to mix up arguments.
+Note that this is all totally untyped: kϕ :: Type, k :: Type, sub :: Type...
+Easy to mix up arguments (or pass the wrong amount).
 
 Main tools for debugging: Core Lint, tc-trace.
 Explained in more detail in my library, and upcoming blog post.

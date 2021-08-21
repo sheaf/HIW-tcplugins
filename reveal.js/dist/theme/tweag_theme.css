@@ -4,16 +4,6 @@
   text-shadow: none;
 }
 
-@font-face {
-  font-family: "Stratos";
-  src: url("Stratos.otf");
-}
-
-@font-face {
-  font-family: "Fira Code";
-  src: url("Fira Code.ttf");
-}
-
 .reveal {
   background-color: #ececec;
   font-family: "Stratos", sans-serif;
