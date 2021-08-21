@@ -9,7 +9,7 @@ date: August 22nd, 2021
 <!--
 Compile the HTML slides with Pandoc:
 
-pandoc -t revealjs -s -o HIW_talk_slides.html HIW_talk_slides.md -V revealjs-url=reveal.js -V theme=tweag_theme -V controlsTutorial=false -V controlsLayout=edges -V slideNumber='c/t' -V transition=slide
+pandoc -t revealjs -s -o index.html HIW_talk_slides.md -V revealjs-url=reveal.js -V theme=tweag_theme -V controlsTutorial=false -V controlsLayout=edges -V slideNumber='c/t' -V transition=slide
 
 Custom theme in reveal.js/dist/themes/tweag_theme.css
 -->
