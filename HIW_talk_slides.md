@@ -1,6 +1,7 @@
 ---
 author: Sam Derbyshire, Tweag
 title: Rewriting type families with GHC type-checking plugins
+subtitle: HIW 2021
 date: August 22nd, 2021
 ---
 
@@ -39,15 +40,8 @@ I've made some improvements to type-checking plugins which I'd like to share.
 ## When to reach for a type-checking plugin?
 
 ::: notes
-Custom solver logic.
-Not restricted to GHC instance resolution.
+Solving typeclasses instances in a custom way (SMT solver, graphs,...).
 Type family reduction (focus of this talk).
-
-- Matt Noonan - Ghosts of Departed Proofs
-- Hiromi Ishii - ghc-typelits-presburger
-- Christiaan Baaij - ghc-typelits-natnormalise, ghc-typelits-knownnat
-- Adam Gundry - units of measure
-- Oleg Grenrus - regular expressions
 :::
 
 ## Equational theory: Peano arithmetic
@@ -1699,8 +1693,9 @@ Compatibility layer in `ghc-tcplugin-api` for GHC 9.0 and 9.2.
 <br />
 
 :::{.element: class="fragment"}
-The [GitHub repository](https://github.com/sheaf/ghc-tcplugin-api)
-contains full code for the System F example.
+[`ghc-tcplugin-api` on GitHub](https://github.com/sheaf/ghc-tcplugin-api)
+contains the System F example.  
+Slides: [github.com/sheaf/HIW-tcplugins](github.com/sheaf/HIW-tcplugins)
 :::
 
 <br />

@@ -90,6 +90,7 @@
 
 <section id="title-slide">
   <h1 class="title">Rewriting type families with GHC type-checking plugins</h1>
+  <p class="subtitle">HIW 2021</p>
   <p class="author">Sam Derbyshire, Tweag</p>
   <p class="date">August 22nd, 2021</p>
 </section>
@@ -127,14 +128,7 @@ Custom theme in reveal.js/dist/themes/tweag_theme.css
 <section id="when-to-reach-for-a-type-checking-plugin" class="slide level2">
 <h2>When to reach for a type-checking plugin?</h2>
 <aside class="notes">
-<p>Custom solver logic. Not restricted to GHC instance resolution. Type family reduction (focus of this talk).</p>
-<ul>
-<li>Matt Noonan - Ghosts of Departed Proofs</li>
-<li>Hiromi Ishii - ghc-typelits-presburger</li>
-<li>Christiaan Baaij - ghc-typelits-natnormalise, ghc-typelits-knownnat</li>
-<li>Adam Gundry - units of measure</li>
-<li>Oleg Grenrus - regular expressions</li>
-</ul>
+<p>Solving typeclasses instances in a custom way (SMT solver, graphs,…). Type family reduction (focus of this talk).</p>
 </aside>
 </section>
 <section id="equational-theory-peano-arithmetic" class="slide level2">
@@ -1619,7 +1613,8 @@ Compatibility layer in <code>ghc-tcplugin-api</code> for GHC 9.0 and 9.2.</p>
 </div>
 <p><br /></p>
 <div class="element: fragment">
-<p>The <a href="https://github.com/sheaf/ghc-tcplugin-api">GitHub repository</a> contains full code for the System F example.</p>
+<p><a href="https://github.com/sheaf/ghc-tcplugin-api"><code>ghc-tcplugin-api</code> on GitHub</a> contains the System F example.<br />
+Slides: <a href="github.com/sheaf/HIW-tcplugins">github.com/sheaf/HIW-tcplugins</a></p>
 </div>
 <p><br /></p>
 <div class="element: fragment">

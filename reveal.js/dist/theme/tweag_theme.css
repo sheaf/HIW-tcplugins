@@ -12,7 +12,13 @@
 
 .title {
   font-size: 28pt;
-  margin-bottom: 50px;
+  margin-bottom: 0px;
+}
+
+.subtitle {
+  font-size: 24pt;
+  margin-bottom: 20px;
+  text-align: center;
 }
 
 .author {
